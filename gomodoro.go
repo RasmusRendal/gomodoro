@@ -28,7 +28,7 @@ import (
 
 func clearLine() {
 	fmt.Printf("\r")
-	fmt.Printf(strings.Repeat(" ", 40))
+	fmt.Printf(strings.Repeat(" ", 50))
 	fmt.Printf("\r")
 	//fmt.Printf(strings.Repeat("\b", 40))
 }
