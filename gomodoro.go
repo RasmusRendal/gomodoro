@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"time"
 )
@@ -49,7 +50,7 @@ func readStdin(x chan bool) {
 	}
 }
 
-func pomodoro(mode string, length time.Duration, inputByte chan bool) {
+func timer(mode string, length time.Duration, inputByte chan bool) {
 	endTime := time.Now().Add(length)
 
 	for time.Now().Before(endTime) {
@@ -80,31 +81,71 @@ func dontDisplayInput() {
 	exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
 }
 
+func pomodoro(length time.Duration, inputByte chan bool) {
+	timer("Pomodoro", length, inputByte)
+	clearLine()
+}
+
+func do_break(length time.Duration, inputByte chan bool) {
+	fmt.Printf("Press any key to start break")
+	anyKey(inputByte)
+	timer("Break", length, inputByte)
+	clearLine()
+	fmt.Printf("Break complete. Press any key to start Pomodoro")
+	anyKey(inputByte)
+}
+
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
+
+// This is probably not valid CSV
+// It's just meant to be human-readable
+func log_pomodoro(name string, start time.Time, end time.Time, length int) {
+	var log_file *os.File
+	user, err := user.Current()
+	check(err)
+	filename := user.HomeDir + "/pomodoros.csv"
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		log_file, err = os.Create(filename)
+		check(err)
+		log_file.WriteString("task,timeStart,timeEnd,length\n")
+	} else {
+		log_file, err = os.OpenFile(filename, os.O_APPEND | os.O_WRONLY, 0600)
+		check(err)
+	}
+	format := "Jan 2 15:04:05"
+	log_file.WriteString(fmt.Sprintf("%s,%s,%s,%d\n", name, start.Format(format), end.Format(format), length))
+	log_file.Sync()
+	log_file.Close()
+}
+
 func main() {
 	dontDisplayInput()
 	var minuteDuration int
 	var breakDuration int
 	var rounds int
+	var task_name string
 	flag.IntVar(&minuteDuration, "p", 25, "Duration of pomodoro in minutes")
 	flag.IntVar(&breakDuration, "b", 5, "Duration of breaks in minutes")
 	flag.IntVar(&rounds, "r", 4, "Amount of pomodoros")
+	flag.StringVar(&task_name, "t", "", "Give a name to a task to log it in ~/pomodoros.csv")
 	flag.Parse()
 
 	var inputByte = make(chan bool, 100)
 	go readStdin(inputByte)
 
 	for i := 1; i <= rounds; i++ {
-		pomodoro("Pomodoro", time.Minute*time.Duration(minuteDuration), inputByte)
-		clearLine()
+		startTime := time.Now()
+		pomodoro(time.Minute*time.Duration(minuteDuration), inputByte)
 		fmt.Printf("Pomodoro %d/%d completed\n", i, rounds)
+		if (task_name != "") {
+			log_pomodoro(task_name, startTime, time.Now(), minuteDuration)
+		}
 		if i != rounds {
-			fmt.Printf("Press any key to start break")
-			anyKey(inputByte)
-			pomodoro("Break", time.Minute*time.Duration(breakDuration), inputByte)
-			clearLine()
-			fmt.Printf("Break complete. Press any key to start Pomodoro")
-			anyKey(inputByte)
+			do_break(time.Minute*time.Duration(breakDuration), inputByte)
 		}
 	}
-
 }
