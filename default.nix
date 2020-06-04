@@ -1,8 +1,15 @@
-with import <nixpkgs> {};
+{ stdenv, pkgs }:
 
 stdenv.mkDerivation {
   name = "gomodoro";
   src = ./.;
 
-  buildInputs = [ go ];
-}
+  buildInputs = [ pkgs.go ];
+
+  buildPhase = "GOCACHE=/tmp go build gomodoro.go";
+
+  installPhase = ''
+    mkdir -p $out/bin;
+    cp gomodoro $out/bin/
+   '';
+ }
