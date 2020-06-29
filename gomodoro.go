@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -50,26 +52,65 @@ func readStdin(x chan bool) {
 	}
 }
 
-func timer(mode string, length time.Duration, inputByte chan bool) {
-	endTime := time.Now().Add(length)
+func timeToString(dur time.Duration) string {
+	h := dur / time.Hour
+	dur -= h * time.Hour
+	m := dur / time.Minute
+	dur -= m * time.Minute
+	s := dur / time.Second
+	if h != 0 {
+		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	} else {
+		return fmt.Sprintf("%02d:%02d", m, s)
+	}
+}
 
-	for time.Now().Before(endTime) {
-		timeLeft := endTime.Sub(time.Now())
-		m := timeLeft / time.Minute
-		timeLeft -= m * time.Minute
-		s := timeLeft / time.Second
+func sleep(inputByte chan bool) time.Duration {
+	var sleepStartTime = time.Now()
+	var x = <-inputByte
+	for !x {
+		x = <-inputByte
+	}
+	return time.Now().Sub(sleepStartTime)
+}
+
+func timerUp(inputByte chan bool) time.Duration {
+	startTime := time.Now()
+	sleepTime := time.Second * 0
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	for true {
+		timeGone := time.Now().Sub(startTime)
 		clearLine()
-		fmt.Printf(mode+" time remaining: %02d:%02d", m, s)
+		fmt.Printf("Time gone: %s", timeToString(timeGone))
 		if len(inputByte) > 0 {
 			var x = <-inputByte
 			if x {
-				var sleepStartTime = time.Now()
+				fmt.Printf("\nPaused\n")
+				sleepTime += sleep(inputByte)
+				fmt.Printf("Continued\n")
+			}
+		}
+		time.Sleep(time.Second)
+		if len(c) != 0 {
+			return time.Now().Sub(startTime) - sleepTime
+		}
+	}
+	return time.Second * 0
+}
+
+func timer(mode string, length time.Duration, inputByte chan bool) {
+	endTime := time.Now().Add(length)
+	for time.Now().Before(endTime) {
+		timeLeft := endTime.Sub(time.Now())
+		clearLine()
+		fmt.Printf(mode+" time remaining: %s", timeToString(timeLeft))
+		if len(inputByte) > 0 {
+			var x = <-inputByte
+			if x {
 				fmt.Printf(" - Paused")
-				x = <-inputByte
-				for !x {
-					x = <-inputByte
-				}
-				endTime = endTime.Add(time.Now().Sub(sleepStartTime))
+				endTime = endTime.Add(sleep(inputByte))
 			}
 		}
 		time.Sleep(time.Second)
@@ -113,7 +154,7 @@ func log_pomodoro(name string, start time.Time, end time.Time, length int) {
 		check(err)
 		log_file.WriteString("task,timeStart,timeEnd,length\n")
 	} else {
-		log_file, err = os.OpenFile(filename, os.O_APPEND | os.O_WRONLY, 0600)
+		log_file, err = os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0600)
 		check(err)
 	}
 	format := "Jan 2 15:04:05"
@@ -137,15 +178,24 @@ func main() {
 	var inputByte = make(chan bool, 100)
 	go readStdin(inputByte)
 
-	for i := 1; i <= rounds; i++ {
+	if minuteDuration == 0 {
 		startTime := time.Now()
-		pomodoro(time.Minute*time.Duration(minuteDuration), inputByte)
-		fmt.Printf("Pomodoro %d/%d completed\n", i, rounds)
-		if (task_name != "") {
-			log_pomodoro(task_name, startTime, time.Now(), minuteDuration)
+		var timerTime = timerUp(inputByte)
+		if task_name != "" {
+			log_pomodoro(task_name, startTime, time.Now(), int(timerTime/time.Minute))
 		}
-		if i != rounds {
-			do_break(time.Minute*time.Duration(breakDuration), inputByte)
+		fmt.Printf("\nCompleted\n")
+	} else {
+		for i := 1; i <= rounds; i++ {
+			startTime := time.Now()
+			pomodoro(time.Minute*time.Duration(minuteDuration), inputByte)
+			fmt.Printf("Pomodoro %d/%d completed\n", i, rounds)
+			if task_name != "" {
+				log_pomodoro(task_name, startTime, time.Now(), minuteDuration)
+			}
+			if i != rounds {
+				do_break(time.Minute*time.Duration(breakDuration), inputByte)
+			}
 		}
 	}
 }
