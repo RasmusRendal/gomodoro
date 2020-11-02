@@ -100,8 +100,10 @@ func timerUp(inputByte chan bool) time.Duration {
 	return time.Second * 0
 }
 
-func timer(mode string, length time.Duration, inputByte chan bool) {
+func timer(mode string, length time.Duration, inputByte chan bool) time.Duration {
 	endTime := time.Now().Add(length)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	for time.Now().Before(endTime) {
 		timeLeft := endTime.Sub(time.Now())
 		clearLine()
@@ -113,8 +115,12 @@ func timer(mode string, length time.Duration, inputByte chan bool) {
 				endTime = endTime.Add(sleep(inputByte))
 			}
 		}
+		if len(c) != 0 {
+			return length - (endTime.Sub(time.Now()))
+		}
 		time.Sleep(time.Second)
 	}
+	return time.Second * -1
 }
 
 func dontDisplayInput() {
@@ -122,9 +128,15 @@ func dontDisplayInput() {
 	exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
 }
 
-func pomodoro(length time.Duration, inputByte chan bool) {
-	timer("Pomodoro", length, inputByte)
+func displayInput() {
+	exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "0").Run()
+	exec.Command("stty", "-F", "/dev/tty", "echo").Run()
+}
+
+func pomodoro(length time.Duration, inputByte chan bool) time.Duration {
+	output := timer("Pomodoro", length, inputByte)
 	clearLine()
+	return output
 }
 
 func do_break(length time.Duration, inputByte chan bool) {
@@ -188,14 +200,24 @@ func main() {
 	} else {
 		for i := 1; i <= rounds; i++ {
 			startTime := time.Now()
-			pomodoro(time.Minute*time.Duration(minuteDuration), inputByte)
-			fmt.Printf("Pomodoro %d/%d completed\n", i, rounds)
-			if task_name != "" {
-				log_pomodoro(task_name, startTime, time.Now(), minuteDuration)
+			output := pomodoro(time.Minute*time.Duration(minuteDuration), inputByte)
+			if output == -1*time.Second {
+				fmt.Printf("Pomodoro %d/%d completed\n", i, rounds)
+				if task_name != "" {
+					log_pomodoro(task_name, startTime, time.Now(), minuteDuration)
+				}
+			} else {
+				fmt.Printf("Pomodoro %d/%d canceled.\n", i, rounds)
+				if task_name != "" {
+					log_pomodoro(task_name, startTime, time.Now(), int(output/time.Minute))
+					displayInput()
+					return
+				}
 			}
 			if i != rounds {
 				do_break(time.Minute*time.Duration(breakDuration), inputByte)
 			}
 		}
 	}
+	displayInput()
 }
